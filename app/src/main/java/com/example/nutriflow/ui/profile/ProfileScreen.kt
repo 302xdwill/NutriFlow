@@ -20,12 +20,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.nutriflow.ui.auth.AuthViewModel
 import kotlinx.coroutines.launch
 import com.example.nutriflow.domain.model.User
-import com.example.nutriflow.ui.profile.ProfileUiState // Importación del estado (debe estar en ProfileViewModel.kt)
-
-
-// NOTA: La data class ProfileUiState debe estar definida SÓLO en ProfileViewModel.kt
-// La importación de arriba resuelve el error de redeclaración.
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -36,10 +30,27 @@ fun ProfileScreen(
     onNavigateToStats: () -> Unit,
     onLogoutSuccessNavigation: () -> Unit
 ) {
+    // 1. Estados
     val user by authViewModel.currentUser.collectAsState()
     val state by profileViewModel.uiState.collectAsState()
     val logoutEvent by profileViewModel.logoutEvent.collectAsState()
 
+    val defaultUser = User() // Asumimos un constructor vacío o con valores por defecto en User
+    var editableUser by remember { mutableStateOf(defaultUser) }
+    var isEditing by remember { mutableStateOf(false) }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+
+    // 2. Efecto de Carga de Usuario (AuthViewModel)
+    LaunchedEffect(user) {
+        if (user != null) {
+            editableUser = user!!
+        }
+    }
+
+    // 3. Efecto de Logout
     LaunchedEffect(logoutEvent) {
         if (logoutEvent) {
             authViewModel.onLogoutSuccess()
@@ -47,64 +58,47 @@ fun ProfileScreen(
         }
     }
 
-    var isEditing by remember { mutableStateOf(false) }
-
-    // ✅ CORRECCIÓN 1: Simplificar la inicialización a valores por defecto válidos.
-    // Asume que User.kt tiene valores por defecto para los demás campos.
-    var editableUser by remember(user) {
-        mutableStateOf(user ?: User(
-            email = "cargando...",
-            id = TODO(),
-            name = TODO(),
-            lastName = TODO(),
-            age = TODO(),
-            weight = TODO(),
-            height = TODO(),
-            photoUrl = TODO(),
-            calorieGoal = TODO(),
-            proteinGoal = TODO(),
-            carbsGoal = TODO(),
-            fatGoal = TODO()
-        ))
+    // 4. Efecto de Guardado (Feedback al usuario)
+    LaunchedEffect(state.saveSuccess) {
+        if (state.saveSuccess) {
+            isEditing = false
+            snackbarHostState.showSnackbar("Perfil actualizado con éxito.")
+            profileViewModel.resetSaveSuccess() // Consumir el evento
+        }
     }
 
-    LaunchedEffect(user) {
-        // ✅ CORRECCIÓN 2: Simplificar la inicialización a valores por defecto válidos.
-        editableUser = user ?: User(
-            email = "cargando...",
-            id = TODO(),
-            name = TODO(),
-            lastName = TODO(),
-            age = TODO(),
-            weight = TODO(),
-            height = TODO(),
-            photoUrl = TODO(),
-            calorieGoal = TODO(),
-            proteinGoal = TODO(),
-            carbsGoal = TODO(),
-            fatGoal = TODO()
-        )
+    // 5. Efecto de Error
+    LaunchedEffect(state.errorMessage) {
+        state.errorMessage?.let { error ->
+            snackbarHostState.showSnackbar(error)
+        }
     }
-
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
 
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("Mi Perfil") }) },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(horizontal = 16.dp)
-                .verticalScroll(rememberScrollState()),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            if (state.isLoading || user == null) {
-                CircularProgressIndicator(modifier = Modifier.padding(32.dp))
-            } else {
+        // Mostrar indicador de carga si el usuario aún no ha cargado
+        if (user == null || state.isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(48.dp))
+            }
+        } else {
+            // Contenido principal del perfil
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(horizontal = 16.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
                 // Tarjeta de Información del Usuario
                 UserProfileHeader(
                     user = user!!,
@@ -122,9 +116,8 @@ fun ProfileScreen(
                     isEditing = isEditing,
                     onToggleEdit = { isEditing = !isEditing },
                     onSave = {
+                        // Deshabilita la edición inmediatamente y guarda
                         profileViewModel.updateUserProfile(editableUser)
-                        isEditing = false
-                        scope.launch { snackbarHostState.showSnackbar("Perfil actualizado con éxito.") }
                     }
                 )
 
@@ -151,7 +144,8 @@ fun ProfileScreen(
                 OutlinedButton(
                     onClick = profileViewModel::logout,
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    enabled = !state.isLoading
                 ) {
                     Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Cerrar Sesión")
                     Spacer(Modifier.width(8.dp))
@@ -164,7 +158,11 @@ fun ProfileScreen(
     }
 }
 
-// Definición de la función renombrada: solo acepta 'user' y 'onEditPhoto'
+// Las funciones auxiliares UserProfileHeader, DatosPersonalesSection, UserTextField,
+// ProfileMenuItem y SettingsSectionTitle se mantienen igual a la versión que enviaste,
+// ya que su lógica es correcta.
+// Se incluye el resto del código para mantener la respuesta completa.
+
 @Composable
 fun UserProfileHeader(user: User, onEditPhoto: () -> Unit) {
     Card(
@@ -175,7 +173,6 @@ fun UserProfileHeader(user: User, onEditPhoto: () -> Unit) {
             modifier = Modifier.padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Sección de Foto de Perfil
             Box(contentAlignment = Alignment.BottomEnd, modifier = Modifier.padding(bottom = 8.dp)) {
                 Icon(
                     Icons.Default.AccountCircle,
@@ -196,8 +193,6 @@ fun UserProfileHeader(user: User, onEditPhoto: () -> Unit) {
         }
     }
 }
-
-// El resto de las funciones auxiliares se mantienen sin cambios
 
 @Composable
 fun DatosPersonalesSection(
@@ -220,7 +215,6 @@ fun DatosPersonalesSection(
                 }
             }
 
-            // Campos Editables
             UserTextField(
                 label = "Nombre",
                 value = user.name,
@@ -239,7 +233,9 @@ fun DatosPersonalesSection(
                 keyboardType = KeyboardType.Number,
                 enabled = isEditing,
                 onValueChange = {
-                    if (it.all { char -> char.isDigit() }) onUserChange(user.copy(age = it.toIntOrNull() ?: 0))
+                    // Solo acepta dígitos y convierte a Int
+                    val filtered = it.filter { char -> char.isDigit() }
+                    onUserChange(user.copy(age = filtered.toIntOrNull() ?: 0))
                 }
             )
             UserTextField(
@@ -248,6 +244,7 @@ fun DatosPersonalesSection(
                 keyboardType = KeyboardType.Number,
                 enabled = isEditing,
                 onValueChange = {
+                    // Acepta números y un punto decimal
                     if (it.matches(Regex("^\\d*(\\.\\d*)?$")) || it.isEmpty()) onUserChange(user.copy(weight = it.toDoubleOrNull() ?: 0.0))
                 }
             )
@@ -257,6 +254,7 @@ fun DatosPersonalesSection(
                 keyboardType = KeyboardType.Number,
                 enabled = isEditing,
                 onValueChange = {
+                    // Acepta números y un punto decimal
                     if (it.matches(Regex("^\\d*(\\.\\d*)?$")) || it.isEmpty()) onUserChange(user.copy(height = it.toDoubleOrNull() ?: 0.0))
                 }
             )

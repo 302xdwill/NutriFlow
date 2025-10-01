@@ -9,16 +9,21 @@ import com.example.nutriflow.data.repository.UserRepositoryImpl
 import com.example.nutriflow.domain.model.Ingredient
 import com.example.nutriflow.domain.repository.IngredientRepository
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first // ⬅️ Importación necesaria
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 
 // Estado del formulario de registro de ingredientes
 data class IngredientFormState(
+    // ✅ CORRECCIÓN 1: El nombre es un String
     val name: String = "",
-    val type: String = "PROTEIN", // Valor inicial de macro (ej: PROTEIN, CARB, FAT, MINERAL)
+    // ✅ CORRECCIÓN 2: El tipo es un String
+    val type: String = "PROTEIN",
     val calPerGram: String = "",
     val isSaving: Boolean = false,
     val saveSuccess: Boolean = false,
@@ -33,11 +38,24 @@ class IngredientViewModel(application: Application) : AndroidViewModel(applicati
     // Estado del formulario de la UI
     private val _formState = MutableStateFlow(IngredientFormState())
     val formState: StateFlow<IngredientFormState> = _formState.asStateFlow()
-
+    // Nuevo estado para el filtro seleccionado por el usuario.
+    private val _selectedFilter = MutableStateFlow("") // "" = Todos
+    val selectedFilter: StateFlow<String> = _selectedFilter.asStateFlow()
     // Lista de ingredientes registrados por el usuario
     private val _ingredients = MutableStateFlow<List<Ingredient>>(emptyList())
     val ingredients: StateFlow<List<Ingredient>> = _ingredients.asStateFlow()
-
+    // Nuevo StateFlow que combina la lista original y el filtro.
+    val filteredIngredients: StateFlow<List<Ingredient>> = combine(_ingredients, _selectedFilter) { ingredients, filter ->
+        if (filter.isBlank()) {
+            ingredients
+        } else {
+            ingredients.filter { it.type == filter }
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
     // ID del usuario activo
     private var activeUserId: String = ""
 
@@ -60,7 +78,9 @@ class IngredientViewModel(application: Application) : AndroidViewModel(applicati
             }
         }
     }
-
+    fun onFilterChange(newFilter: String) {
+        _selectedFilter.value = newFilter
+    }
     // --- LÓGICA DE ACTUALIZACIÓN DEL FORMULARIO ---
 
     fun onNameChange(newName: String) {

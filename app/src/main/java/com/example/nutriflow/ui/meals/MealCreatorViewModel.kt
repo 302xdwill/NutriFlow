@@ -12,35 +12,20 @@ import com.example.nutriflow.domain.model.Plate
 import com.example.nutriflow.domain.model.PlateIngredient
 import com.example.nutriflow.domain.repository.IngredientRepository
 import com.example.nutriflow.domain.repository.PlateRepository
+// ⚠️ ASEGÚRATE DE QUE PlateCreatorState ESTÉ IMPORTADO O DEFINIDO EN OTRO LADO
+import com.example.nutriflow.ui.meals.PlateCreatorState // <--- ¡Asegura que esta línea exista si moviste la clase!
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
-import kotlinx.coroutines.flow.first // <-- ¡IMPORTANTE! Se necesita para obtener el valor del Flow
-
-// --- ESTADOS DE LA UI ---
-
-// Estado que representa la receta que el usuario está construyendo
-data class PlateCreatorState(
-    val plateName: String = "",
-    val plateDescription: String = "",
-    val components: List<PlateIngredient> = emptyList(), // Ingredientes seleccionados con peso
-    val availableIngredients: List<Ingredient> = emptyList(), // Lista maestra de ingredientes del usuario
-    val totalCalories: Double = 0.0,
-    val totalProtein: Double = 0.0,
-    val totalCarbs: Double = 0.0,
-    val totalFat: Double = 0.0,
-    val isSaving: Boolean = false,
-    val saveSuccess: Boolean = false,
-    val errorMessage: String? = null
-)
 
 class MealCreatorViewModel(application: Application) : AndroidViewModel(application) {
 
     private val plateRepository: PlateRepository
     private val ingredientRepository: IngredientRepository
     private val userRepository: UserRepositoryImpl
-    private val database: NutriFlowDatabase // Necesario para inyectar al PlateRepository
+    private val database: NutriFlowDatabase
 
+    // Estado de la UI
     private val _uiState = MutableStateFlow(PlateCreatorState())
     val uiState: StateFlow<PlateCreatorState> = _uiState.asStateFlow()
 
@@ -58,12 +43,10 @@ class MealCreatorViewModel(application: Application) : AndroidViewModel(applicat
 
         // 1. Obtener el ID del usuario activo
         viewModelScope.launch {
-            // ✅ CORRECCIÓN: Usamos .first() para obtener el valor único del Flow (Línea 62 del error)
-            val userIdFlow = userRepository.getActiveUserEmail()
-            val userId = userIdFlow.first()
+            val userId = userRepository.getActiveUserEmail().first()
 
             if (userId != null) {
-                activeUserId = userId // Asignación de String (valor) a String (variable)
+                activeUserId = userId
                 // 2. Cargar los ingredientes disponibles
                 loadAvailableIngredients(activeUserId)
             } else {
@@ -99,19 +82,79 @@ class MealCreatorViewModel(application: Application) : AndroidViewModel(applicat
         _uiState.update { it.copy(plateDescription = newDesc, saveSuccess = false, errorMessage = null) }
     }
 
+    // --- MANEJO DEL BUSCADOR ---
+
+    fun onIngredientSearchQueryChange(query: String) {
+        val filtered = if (query.isBlank()) {
+            emptyList()
+        } else {
+            // Filtramos la lista maestra (availableIngredients)
+            _uiState.value.availableIngredients.filter {
+                it.name.contains(query, ignoreCase = true)
+            }
+        }
+        _uiState.update {
+            it.copy(
+                ingredientSearchQuery = query,
+                filteredIngredients = filtered,
+                // Si el usuario empieza a escribir de nuevo, deseleccionamos el ingrediente anterior.
+                selectedIngredientForAdding = null
+            )
+        }
+    }
+
+    fun onIngredientAmountChange(amount: String) {
+        // Permitir solo números y manejar el String (incluyendo un punto decimal para peso exacto)
+        val filtered = amount.filter { it.isDigit() || it == '.' }
+        _uiState.update { it.copy(ingredientAmount = filtered, errorMessage = null) }
+    }
+
+    fun selectIngredientForInput(ingredient: Ingredient) {
+        // Almacenar el objeto Ingredient en el estado.
+        _uiState.update {
+            it.copy(
+                ingredientSearchQuery = ingredient.name,
+                filteredIngredients = emptyList(), // Limpiamos la lista de resultados
+                selectedIngredientForAdding = ingredient, // ¡Guardamos la referencia!
+                errorMessage = null
+            )
+        }
+    }
+
     // --- GESTIÓN DE COMPONENTES DEL PLATO ---
 
     /**
-     * Añade un ingrediente base a la lista de componentes del plato con un peso inicial de 0.
+     * Añade un ingrediente base a la lista de componentes del plato con el peso especificado.
      */
-    fun addIngredientToPlate(ingredient: Ingredient) {
+    fun addIngredientToPlate() {
+        val state = _uiState.value
+        val amount = state.ingredientAmount.toDoubleOrNull()
+
+        // Validar usando la referencia directa del objeto
+        val selectedIngredient = state.selectedIngredientForAdding
+
+        if (selectedIngredient == null || amount == null || amount <= 0) {
+            _uiState.update { it.copy(errorMessage = "Seleccione un ingrediente válido e ingrese una cantidad > 0.") }
+            return
+        }
+
+        // 2. Crear y añadir el nuevo componente
         val newComponent = PlateIngredient(
-            plateId = 0, // ID temporal, se asigna al guardar
-            ingredient = ingredient,
-            weightGrams = 0.0
+            plateId = 0, // ID temporal
+            ingredient = selectedIngredient,
+            weightGrams = amount
         )
+
+        // 3. Limpiar y actualizar el estado
         _uiState.update {
-            it.copy(components = it.components + newComponent)
+            it.copy(
+                components = it.components + newComponent,
+                ingredientSearchQuery = "",
+                ingredientAmount = "",
+                filteredIngredients = emptyList(),
+                selectedIngredientForAdding = null, // Reseteamos la selección para el próximo ingrediente
+                errorMessage = null // Limpiamos cualquier error previo
+            )
         }
     }
 
@@ -119,7 +162,9 @@ class MealCreatorViewModel(application: Application) : AndroidViewModel(applicat
      * Actualiza el peso de un componente específico.
      */
     fun updateComponentWeight(index: Int, weightString: String) {
-        val weight = weightString.toDoubleOrNull() ?: 0.0
+        // Permitir solo números y manejar el String (incluyendo un punto decimal)
+        val filteredWeightString = weightString.filter { it.isDigit() || it == '.' }
+        val weight = filteredWeightString.toDoubleOrNull() ?: 0.0
         val currentComponents = _uiState.value.components.toMutableList()
 
         if (index >= 0 && index < currentComponents.size) {
@@ -148,24 +193,24 @@ class MealCreatorViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         var totalCals = 0.0
-        var totalProtein = 0.0
-        var totalCarbs = 0.0
-        var totalFat = 0.0
+        var totalProteinGrams = 0.0
+        var totalCarbsGrams = 0.0
+        var totalFatGrams = 0.0
 
         for (component in components) {
             val weight = component.weightGrams
             val calPerGram = component.ingredient.caloriesPerGram
             val type = component.ingredient.type
 
-            // Cálculo base de calorías
+            // Cálculo de calorías totales (el peso * cal/gramo)
             totalCals += weight * calPerGram
 
-            // Asignación de macros (Usando factores estándar: 4/4/9 kcal/g)
+            // Cálculo de los macros (en GRAMOS)
             when (type) {
-                "PROTEIN" -> totalProtein += (weight * calPerGram) / 4.0
-                "CARB" -> totalCarbs += (weight * calPerGram) / 4.0
-                "FAT" -> totalFat += (weight * calPerGram) / 9.0
-                // MINERAL se ignora en la contribución a macros principales (Protein, Carb, Fat)
+                "PROT" -> totalProteinGrams += weight
+                "CARB" -> totalCarbsGrams += weight
+                "FAT" -> totalFatGrams += weight
+                // Los minerales son ignorados en el cálculo de los 3 macros
             }
         }
 
@@ -173,9 +218,9 @@ class MealCreatorViewModel(application: Application) : AndroidViewModel(applicat
         _uiState.update {
             it.copy(
                 totalCalories = totalCals.roundTo(2),
-                totalProtein = totalProtein.roundTo(2),
-                totalCarbs = totalCarbs.roundTo(2),
-                totalFat = totalFat.roundTo(2)
+                totalProtein = totalProteinGrams.roundTo(2),
+                totalCarbs = totalCarbsGrams.roundTo(2),
+                totalFat = totalFatGrams.roundTo(2)
             )
         }
     }
@@ -195,8 +240,11 @@ class MealCreatorViewModel(application: Application) : AndroidViewModel(applicat
             _uiState.update { it.copy(errorMessage = "Error de autenticación.", isSaving = false) }
             return
         }
-        if (_uiState.value.plateName.isBlank() || _uiState.value.components.isEmpty()) {
-            _uiState.update { it.copy(errorMessage = "Debe nombrar el plato y añadir al menos un ingrediente.") }
+        // Validar que hay un nombre y al menos un componente con peso > 0
+        val validComponents = _uiState.value.components.filter { it.weightGrams > 0 }
+
+        if (_uiState.value.plateName.isBlank() || validComponents.isEmpty()) {
+            _uiState.update { it.copy(errorMessage = "Debe nombrar el plato y añadir al menos un ingrediente con cantidad mayor a 0.") }
             return
         }
 
@@ -209,19 +257,20 @@ class MealCreatorViewModel(application: Application) : AndroidViewModel(applicat
                     name = state.plateName.trim(),
                     description = state.plateDescription.trim(),
                     userId = activeUserId,
-                    components = state.components.filter { it.weightGrams > 0 }, // Solo guardar componentes con peso
+                    components = validComponents, // Solo guardar componentes válidos
                     totalCalories = state.totalCalories,
                     totalProtein = state.totalProtein,
                     totalCarbs = state.totalCarbs,
                     totalFat = state.totalFat
                 )
 
+                // Guardar el plato
                 plateRepository.savePlate(finalPlate)
 
                 _uiState.update {
                     it.copy(
                         isSaving = false,
-                        saveSuccess = true,
+                        saveSuccess = true, // Esto activará el LaunchedEffect en la UI para volver
                         errorMessage = null
                     )
                 }
@@ -236,6 +285,7 @@ class MealCreatorViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    // Funciones de utilidad
     fun resetSaveSuccess() {
         _uiState.update { it.copy(saveSuccess = false) }
     }
@@ -252,7 +302,11 @@ class MealCreatorViewModel(application: Application) : AndroidViewModel(applicat
                 totalFat = 0.0,
                 isSaving = false,
                 saveSuccess = false,
-                errorMessage = null
+                errorMessage = null,
+                ingredientSearchQuery = "",
+                ingredientAmount = "",
+                filteredIngredients = emptyList(),
+                selectedIngredientForAdding = null
             )
         }
     }

@@ -15,32 +15,25 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 
-// 🛑 IMPORTANTE: Debes tener estas clases implementadas
-// data class GoalsState(...)
-// class GoalsViewModel(...)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GoalsScreen(
     viewModel: GoalsViewModel = viewModel(),
-    onGoalsSaved: () -> Unit // Función para volver a la pantalla anterior (Perfil)
+    onGoalsSaved: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    // 1. Manejo del éxito del guardado
+    // 1. Manejo del éxito del guardado (NAVEGACIÓN)
     LaunchedEffect(state.saveSuccess) {
         if (state.saveSuccess) {
-            scope.launch {
-                snackbarHostState.showSnackbar("Metas guardadas con éxito.")
-            }
             viewModel.resetSaveSuccess()
             onGoalsSaved() // Navegar de vuelta
         }
     }
 
-    // 2. Manejo de errores
+    // 2. Manejo de errores (FEEDBACK)
     LaunchedEffect(state.errorMessage) {
         state.errorMessage?.let { error ->
             scope.launch {
@@ -52,7 +45,7 @@ fun GoalsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Editar Metas") },
+                title = { Text("Editar Metas Nutricionales") },
                 navigationIcon = {
                     IconButton(onClick = onGoalsSaved) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Volver")
@@ -75,10 +68,10 @@ fun GoalsScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
                 .padding(horizontal = 16.dp),
-            contentAlignment = Alignment.Center
+            contentAlignment = Alignment.TopCenter // Cambiado a TopCenter para el formulario
         ) {
             if (state.isLoading) {
-                CircularProgressIndicator()
+                CircularProgressIndicator(modifier = Modifier.padding(top = 64.dp))
             } else {
                 GoalsForm(state = state, viewModel = viewModel)
             }
@@ -96,12 +89,12 @@ fun GoalsForm(state: GoalsState, viewModel: GoalsViewModel) {
     ) {
         Text(
             "Define tus objetivos diarios:",
-            style = MaterialTheme.typography.headlineSmall,
+            style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(bottom = 24.dp)
         )
 
-        // Campo 1: Calorías
+        // Campos de entrada
         GoalInputField(
             label = "Objetivo de Calorías (kcal)",
             value = state.calorieGoalInput,
@@ -109,7 +102,6 @@ fun GoalsForm(state: GoalsState, viewModel: GoalsViewModel) {
             modifier = Modifier.padding(bottom = 16.dp)
         )
 
-        // Campo 2: Proteína
         GoalInputField(
             label = "Objetivo de Proteína (g)",
             value = state.proteinGoalInput,
@@ -117,7 +109,6 @@ fun GoalsForm(state: GoalsState, viewModel: GoalsViewModel) {
             modifier = Modifier.padding(bottom = 16.dp)
         )
 
-        // Campo 3: Carbohidratos
         GoalInputField(
             label = "Objetivo de Carbohidratos (g)",
             value = state.carbsGoalInput,
@@ -125,7 +116,6 @@ fun GoalsForm(state: GoalsState, viewModel: GoalsViewModel) {
             modifier = Modifier.padding(bottom = 16.dp)
         )
 
-        // Campo 4: Grasa
         GoalInputField(
             label = "Objetivo de Grasa (g)",
             value = state.fatGoalInput,
@@ -151,12 +141,7 @@ fun GoalsForm(state: GoalsState, viewModel: GoalsViewModel) {
 fun GoalInputField(label: String, value: String, onValueChange: (String) -> Unit, modifier: Modifier) {
     OutlinedTextField(
         value = value,
-        onValueChange = { newValue ->
-            // Filtro para permitir solo números (incluyendo decimales para casos avanzados)
-            if (newValue.isEmpty() || newValue.matches(Regex("^\\d*(\\.\\d*)?$"))) {
-                onValueChange(newValue)
-            }
-        },
+        onValueChange = onValueChange, // La validación se hace en el ViewModel
         label = { Text(label) },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         modifier = modifier.fillMaxWidth(),

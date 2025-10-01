@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.nutriflow.domain.model.Ingredient
 import com.example.nutriflow.domain.model.PlateIngredient
@@ -92,7 +93,7 @@ fun MealCreatorScreen(
                     ComponentList(viewModel, state.components)
                 }
                 // Columna 2: Selector de Ingredientes (40% ancho)
-                IngredientSelector(viewModel, state.availableIngredients, state.components.map { it.ingredient.name })
+                IngredientSelector(viewModel, state) // Pasamos todo el estado
             }
         }
     }
@@ -158,11 +159,10 @@ fun PlateDetailsForm(viewModel: MealCreatorViewModel, state: PlateCreatorState) 
 @Composable
 fun IngredientSelector(
     viewModel: MealCreatorViewModel,
-    availableIngredients: List<Ingredient>,
-    addedIngredientNames: List<String>
+    state: PlateCreatorState
 ) {
-    // Implementación simple: lista todos los ingredientes disponibles
-    // Se puede mejorar con un campo de búsqueda o filtros por tipo.
+    val addedIngredientNames = state.components.map { it.ingredient.name }
+
     Card(
         modifier = Modifier.fillMaxHeight().fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -171,17 +171,67 @@ fun IngredientSelector(
             Text("Añadir Ingredientes", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
 
-            if (availableIngredients.isEmpty()) {
+            // Campo de búsqueda principal
+            OutlinedTextField(
+                value = state.ingredientSearchQuery,
+                onValueChange = viewModel::onIngredientSearchQueryChange,
+                label = { Text("Buscar Ingrediente") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                singleLine = true
+            )
+
+            // Si hay un ingrediente seleccionado, mostramos el campo de cantidad y el botón Añadir
+            state.selectedIngredientForAdding?.let { ingredient ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    // Nombre del ingrediente seleccionado
+                    Text(ingredient.name, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+
+                    // Campo de cantidad
+                    OutlinedTextField(
+                        value = state.ingredientAmount,
+                        onValueChange = viewModel::onIngredientAmountChange,
+                        label = { Text("Gramos") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.width(100.dp),
+                        singleLine = true,
+                        trailingIcon = { Text("g", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    )
+
+                    // Botón de Añadir (llama a la función sin argumentos)
+                    IconButton(
+                        onClick = viewModel::addIngredientToPlate,
+                        enabled = state.ingredientAmount.toDoubleOrNull()?.let { it > 0 } ?: false,
+                        modifier = Modifier.padding(start = 8.dp)
+                    ) {
+                        Icon(Icons.Default.AddCircle, contentDescription = "Añadir al Plato", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+
+            // Lista de resultados de búsqueda o lista completa
+            if (state.availableIngredients.isEmpty()) {
                 Text("No hay ingredientes registrados. Ve a la sección 'Ingredientes' para crear uno.",
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
             } else {
-                LazyColumn {
-                    items(availableIngredients) { ingredient ->
+                LazyColumn(modifier = Modifier.fillMaxHeight()) {
+                    val listToShow = if (state.ingredientSearchQuery.isBlank()) {
+                        state.availableIngredients
+                    } else {
+                        state.filteredIngredients
+                    }
+
+                    items(listToShow) { ingredient ->
                         val isAdded = addedIngredientNames.contains(ingredient.name)
+                        // ✅ CORRECCIÓN: Llama a selectIngredientForInput, no addIngredientToPlate
                         IngredientSelectListItem(
                             ingredient = ingredient,
                             isAdded = isAdded,
-                            onAdd = { viewModel.addIngredientToPlate(ingredient) }
+                            onSelect = { viewModel.selectIngredientForInput(ingredient) }
                         )
                     }
                 }
@@ -191,17 +241,23 @@ fun IngredientSelector(
 }
 
 @Composable
-fun IngredientSelectListItem(ingredient: Ingredient, isAdded: Boolean, onAdd: () -> Unit) {
+fun IngredientSelectListItem(ingredient: Ingredient, isAdded: Boolean, onSelect: () -> Unit) {
+    val isSelectedForInput = LocalViewModelStoreOwner.current?.let {
+        (viewModel<MealCreatorViewModel>().uiState.collectAsState().value.selectedIngredientForAdding == ingredient)
+    } ?: false
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelectedForInput) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface
+        )
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(enabled = !isAdded, onClick = onAdd)
+                .clickable(enabled = !isAdded, onClick = onSelect)
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
@@ -213,7 +269,7 @@ fun IngredientSelectListItem(ingredient: Ingredient, isAdded: Boolean, onAdd: ()
             if (isAdded) {
                 Icon(Icons.Default.Done, contentDescription = "Añadido", tint = MaterialTheme.colorScheme.secondary)
             } else {
-                Icon(Icons.Default.Add, contentDescription = "Añadir")
+                Icon(Icons.Default.Add, contentDescription = "Seleccionar")
             }
         }
     }

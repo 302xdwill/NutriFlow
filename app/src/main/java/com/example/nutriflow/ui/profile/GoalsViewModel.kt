@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.firstOrNull
+import kotlin.math.roundToInt
 
 // Estado que maneja los campos editables y el estado de la operación
 data class GoalsState(
@@ -32,12 +33,10 @@ class GoalsViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(GoalsState())
     val uiState: StateFlow<GoalsState> = _uiState.asStateFlow()
 
-    private var currentUser: User? = null // Mantener la referencia completa del usuario
+    private var currentUser: User? = null
 
     init {
         val database = NutriFlowDatabase.getDatabase(application)
-        // Asegúrate de que tienes un patrón de inyección de dependencias adecuado.
-        // Por ahora, lo mantenemos como lo definiste.
         userRepository = UserRepositoryImpl(database.userDao())
         loadGoals()
     }
@@ -46,26 +45,22 @@ class GoalsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             try {
-                // ✅ Obtenemos el ID de usuario activo
-                val activeUserEmailFlow = userRepository.getActiveUserEmail()
-                val activeUserId = activeUserEmailFlow.firstOrNull()
+                // Obtener el ID de usuario activo
+                val activeUserId = userRepository.getActiveUserEmail().firstOrNull()
 
                 if (activeUserId != null) {
-                    // Usamos .collect para seguir observando si el repositorio cambia el usuario
-                    // Corregimos: Usamos .first() o .firstOrNull() si solo necesitamos el valor inicial,
-                    // o envolvemos el collect en un try-catch que maneje la cancelación del Job.
-                    // Para un ViewModel, collect es generalmente mejor para mantener la reactividad.
+                    // Usamos collect para reaccionar si el usuario es actualizado
                     userRepository.getUser(activeUserId).collect { user ->
                         if (user != null) {
                             currentUser = user
                             _uiState.update {
                                 it.copy(
                                     userId = user.email,
-                                    // Aseguramos que los valores sean Double antes de convertirlos a String
-                                    calorieGoalInput = user.calorieGoal.toString(),
-                                    proteinGoalInput = user.proteinGoal.toString(),
-                                    carbsGoalInput = user.carbsGoal.toString(),
-                                    fatGoalInput = user.fatGoal.toString(),
+                                    // Redondeo simple para inputs.
+                                    calorieGoalInput = user.calorieGoal.roundTo(0).toString(),
+                                    proteinGoalInput = user.proteinGoal.roundTo(0).toString(),
+                                    carbsGoalInput = user.carbsGoal.roundTo(0).toString(),
+                                    fatGoalInput = user.fatGoal.roundTo(0).toString(),
                                     isLoading = false
                                 )
                             }
@@ -82,37 +77,33 @@ class GoalsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // --- MANEJO DE CAMBIOS ---
-    // Las funciones de cambio de valor son correctas.
-    fun onCalorieGoalChange(newValue: String) {
-        val filteredValue = newValue.filter { it.isDigit() || it == '.' }
-        _uiState.update { it.copy(calorieGoalInput = filteredValue) }
+    private fun Double.roundTo(decimals: Int): Int {
+        var multiplier = 1.0
+        repeat(decimals) { multiplier *= 10 }
+        return (this * multiplier).roundToInt()
     }
 
-    fun onProteinGoalChange(newValue: String) {
-        val filteredValue = newValue.filter { it.isDigit() || it == '.' }
-        _uiState.update { it.copy(proteinGoalInput = filteredValue) }
+    // --- MANEJO DE CAMBIOS (Se mantienen y se refuerza el filtro) ---
+
+    private fun filterInput(newValue: String): String {
+        return newValue.filter { it.isDigit() || it == '.' }
     }
 
-    fun onCarbsGoalChange(newValue: String) {
-        val filteredValue = newValue.filter { it.isDigit() || it == '.' }
-        _uiState.update { it.copy(carbsGoalInput = filteredValue) }
-    }
-
-    fun onFatGoalChange(newValue: String) {
-        val filteredValue = newValue.filter { it.isDigit() || it == '.' }
-        _uiState.update { it.copy(fatGoalInput = filteredValue) }
-    }
+    fun onCalorieGoalChange(newValue: String) { _uiState.update { it.copy(calorieGoalInput = filterInput(newValue)) } }
+    fun onProteinGoalChange(newValue: String) { _uiState.update { it.copy(proteinGoalInput = filterInput(newValue)) } }
+    fun onCarbsGoalChange(newValue: String) { _uiState.update { it.copy(carbsGoalInput = filterInput(newValue)) } }
+    fun onFatGoalChange(newValue: String) { _uiState.update { it.copy(fatGoalInput = filterInput(newValue)) } }
 
     fun resetSaveSuccess() {
         _uiState.update { it.copy(saveSuccess = false) }
     }
 
-    // --- FUNCIÓN DE GUARDADO ---
+    // --- FUNCIÓN DE GUARDADO (Corregida) ---
+
     fun saveGoals() {
         val state = _uiState.value
 
-        // Validación básica
+        // Validación y conversión
         val calories = state.calorieGoalInput.toDoubleOrNull()
         val protein = state.proteinGoalInput.toDoubleOrNull()
         val carbs = state.carbsGoalInput.toDoubleOrNull()
@@ -120,7 +111,7 @@ class GoalsViewModel(application: Application) : AndroidViewModel(application) {
 
         if (calories == null || protein == null || carbs == null || fat == null ||
             calories <= 0 || protein < 0 || carbs < 0 || fat < 0) {
-            _uiState.update { it.copy(errorMessage = "Por favor, ingresa valores válidos y positivos.") }
+            _uiState.update { it.copy(errorMessage = "Por favor, ingresa valores válidos (Calorías > 0).") }
             return
         }
 
@@ -129,18 +120,15 @@ class GoalsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 if (currentUser != null) {
-                    // ✅ CORRECCIÓN CLAVE: Se eliminaron las comas sueltas.
                     val updatedUser = currentUser!!.copy(
                         calorieGoal = calories,
                         proteinGoal = protein,
                         carbsGoal = carbs,
                         fatGoal = fat
-                        // El resto de las propiedades del usuario se copian automáticamente
                     )
                     userRepository.updateUser(updatedUser)
 
-                    // Actualizamos la referencia local del usuario
-                    currentUser = updatedUser
+                    currentUser = updatedUser // Actualizamos la referencia local
 
                     _uiState.update { it.copy(isSaving = false, saveSuccess = true) }
                 } else {

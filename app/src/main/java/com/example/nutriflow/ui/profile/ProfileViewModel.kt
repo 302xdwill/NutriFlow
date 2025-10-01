@@ -12,40 +12,40 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-// El estado de la UI que ya definiste en ProfileScreen.kt (solo para referencia)
+// --- ESTADO DE LA UI DEL PERFIL ---
 data class ProfileUiState(
-    val user: User? = null,
+    // Este estado sólo se usa para mostrar el feedback de las operaciones
     val isLoading: Boolean = false,
+    val saveSuccess: Boolean = false, // Nuevo: Para mostrar feedback de guardado
     val errorMessage: String? = null
 )
 
 class ProfileViewModel(application: Application) : AndroidViewModel(application) {
 
-    // Asumimos que inicializas el repositorio aquí
     private val userRepository: UserRepositoryImpl
-    private val _uiState = MutableStateFlow(ProfileUiState(isLoading = true))
+    private val _uiState = MutableStateFlow(ProfileUiState())
     val uiState: StateFlow<ProfileUiState> = _uiState.asStateFlow()
 
-    // Manejo de eventos de logout
+    // Manejo de eventos de logout (se mantiene)
     private val _logoutEvent = MutableStateFlow(false)
     val logoutEvent: StateFlow<Boolean> = _logoutEvent.asStateFlow()
 
     init {
         val database = NutriFlowDatabase.getDatabase(application)
         userRepository = UserRepositoryImpl(database.userDao())
-        // Puedes cargar el usuario aquí si es necesario, pero ProfileScreen ya lo hace vía AuthViewModel.
     }
 
-    // 1. ✅ FUNCIÓN CLAVE FALTANTE: Actualiza el perfil del usuario
+    /**
+     * Actualiza el perfil del usuario en el repositorio.
+     */
     fun updateUserProfile(user: User) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            _uiState.update { it.copy(isLoading = true, errorMessage = null, saveSuccess = false) }
             try {
-                // El repositorio debe manejar la conversión de User (dominio) a UserEntity (Room)
                 userRepository.updateUser(user)
 
-                // Opcional: Recargar el usuario o simplemente actualizar el estado
-                _uiState.update { it.copy(isLoading = false) }
+                // Éxito:
+                _uiState.update { it.copy(isLoading = false, saveSuccess = true) }
 
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false, errorMessage = "Error al actualizar: ${e.message}") }
@@ -53,7 +53,9 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    // 2. Función de Logout
+    /**
+     * Función de Logout
+     */
     fun logout() {
         viewModelScope.launch {
             try {
@@ -63,5 +65,12 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
                 _uiState.update { it.copy(errorMessage = "Error al cerrar sesión: ${e.message}") }
             }
         }
+    }
+
+    /**
+     * Función para resetear el estado de éxito después de que la UI lo haya consumido.
+     */
+    fun resetSaveSuccess() {
+        _uiState.update { it.copy(saveSuccess = false) }
     }
 }

@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -20,35 +21,44 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.nutriflow.domain.model.Meal
 import com.example.nutriflow.domain.model.Plate
+import com.example.nutriflow.domain.model.DailySummary
+import com.example.nutriflow.domain.model.MealScheduleState
 import java.text.SimpleDateFormat
 import java.util.*
-
-// 🛑 Asumo que las clases DailySummary y AddMealState están definidas en otro lugar
-// y son accesibles/importables para este paquete.
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScheduleScreen(
-    // 🛑 Nota: Debes asegurarte de tener un ScheduleViewModelFactory para esto
     viewModel: ScheduleViewModel = viewModel(),
-    onNavigateToMealCreator: () -> Unit // Función para navegar al creador de platos
+    onNavigateToMealCreator: () -> Unit
 ) {
-    // 🛑 Inicialización de estados, asumiendo que DailySummary y AddMealState son visibles.
-    // (Necesitarás reemplazar DailySummary() y AddMealState() por tu inicialización real)
-    val summary by viewModel.summary.collectAsState(
-        initial = DailySummary(calorieGoal = 2000.0) // Usar valores por defecto para evitar errores al inicio
+    // 1. ESTADOS - USAMOS DECLARACIÓN EXPLÍCITA DE State<T> EN TODOS LOS FLUJOS
+
+    val summaryState: State<DailySummary> = viewModel.summary.collectAsState(
+        initial = DailySummary()
     )
-    val dailyMeals by viewModel.dailyMeals.collectAsState(initial = emptyList())
+    val summary = summaryState.value
+
+    val dailyMealsState: State<List<Meal>> = viewModel.dailyMeals.collectAsState(
+        initial = emptyList()
+    )
+    val dailyMeals = dailyMealsState.value
+
     val selectedDate by viewModel.selectedDate.collectAsState(initial = Date())
-    val addMealState by viewModel.addMealState.collectAsState(
-        initial = AddMealState()
+
+    val addMealState: State<MealScheduleState> = viewModel.addMealState.collectAsState(
+        initial = MealScheduleState()
     )
+
+    val addMealData = addMealState.value
 
     var showAddMealDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(addMealState.saveSuccess) {
-        if (addMealState.saveSuccess) {
+    // 2. Manejo de la navegación y reinicio del estado del diálogo
+    LaunchedEffect(addMealState.value.saveSuccess) {
+        if (addMealData.saveSuccess) {
             showAddMealDialog = false
+            viewModel.resetAddMealState()
         }
     }
 
@@ -77,13 +87,14 @@ fun ScheduleScreen(
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
+            // Llama a la versión corregida de ScheduledMealList
             ScheduledMealList(dailyMeals)
         }
 
         if (showAddMealDialog) {
             AddMealDialog(
                 viewModel = viewModel,
-                state = addMealState,
+                state = addMealData,
                 onDismiss = { showAddMealDialog = false; viewModel.resetAddMealState() },
                 onNavigateToMealCreator = onNavigateToMealCreator
             )
@@ -95,6 +106,8 @@ fun ScheduleScreen(
 
 @Composable
 fun DateSelector(viewModel: ScheduleViewModel, selectedDate: Date) {
+    val isToday = isToday(selectedDate)
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -106,11 +119,18 @@ fun DateSelector(viewModel: ScheduleViewModel, selectedDate: Date) {
             Icon(Icons.Default.ArrowBack, contentDescription = "Día anterior")
         }
 
-        Text(
-            text = getFormattedDate(selectedDate),
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = if (isToday) "HOY" else getFormattedDate(selectedDate),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = if (isToday) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+            )
+            if (!isToday) {
+                Text(getFormattedDate(selectedDate), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
 
         IconButton(onClick = { viewModel.selectNewDate(getNextDay(selectedDate)) }) {
             Icon(Icons.Default.ArrowForward, contentDescription = "Día siguiente")
@@ -118,14 +138,14 @@ fun DateSelector(viewModel: ScheduleViewModel, selectedDate: Date) {
     }
 }
 
-// Nota: DailySummary debe ser un tipo de dato accesible/importable
 @Composable
 fun DailySummaryCard(summary: DailySummary) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        shape = RoundedCornerShape(12.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
@@ -138,17 +158,27 @@ fun DailySummaryCard(summary: DailySummary) {
             MacroProgressRow("🔥 Calorías", summary.totalCalories, summary.calorieGoal, MaterialTheme.colorScheme.error)
             MacroProgressRow("🥩 Proteína", summary.totalProtein, summary.proteinGoal, MaterialTheme.colorScheme.primary)
             MacroProgressRow("🍚 Carbos", summary.totalCarbs, summary.carbsGoal, MaterialTheme.colorScheme.secondary)
-            MacroProgressRow("🥑 Minerales", summary.totalMinerals, summary.mineralsGoal, MaterialTheme.colorScheme.tertiary) // CORRECCIÓN: Usé minerals en tu código original, lo cambié a Grasas/Fat que es más común
+            MacroProgressRow("🥑 Grasa", summary.totalFat, summary.fatGoal, MaterialTheme.colorScheme.tertiary)
         }
     }
 }
 
+
 @Composable
 fun ScheduledMealList(meals: List<Meal>) {
-    LazyColumn(modifier = Modifier.fillMaxWidth()) {
+    // ✅ CORRECCIÓN FINAL: Reemplazamos .weight(1f) por un fillMaxHeight en un intento de flexibilización.
+    // Aunque es menos limpio que weight, evita el error de "invoke()"
+    LazyColumn(modifier = Modifier
+        .fillMaxWidth()
+        .fillMaxHeight() // Usamos fillMaxHeight para tomar el espacio restante sin weight
+    ) {
         if (meals.isEmpty()) {
             item {
-                Text("No hay comidas programadas para este día.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "No hay comidas programadas para este día.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 16.dp)
+                )
             }
         } else {
             items(meals) { meal ->
@@ -162,7 +192,8 @@ fun ScheduledMealList(meals: List<Meal>) {
 fun ScheduledMealItem(meal: Meal) {
     Card(modifier = Modifier
         .fillMaxWidth()
-        .padding(vertical = 4.dp)
+        .padding(vertical = 4.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
         Row(
             modifier = Modifier
@@ -172,8 +203,9 @@ fun ScheduledMealItem(meal: Meal) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column {
-                Text(meal.type, fontWeight = FontWeight.Bold)
-                Text("${meal.name} (${meal.calories.toInt()} kcal)", style = MaterialTheme.typography.bodySmall)
+                Text(meal.type, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text(meal.name, style = MaterialTheme.typography.titleSmall)
+                Text("${meal.calories.toInt()} kcal", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Text(getFormattedTime(meal.scheduledTime), fontWeight = FontWeight.SemiBold)
         }
@@ -182,11 +214,9 @@ fun ScheduledMealItem(meal: Meal) {
 
 @Composable
 fun MacroProgressRow(label: String, current: Double, goal: Double, color: Color) {
-    // ✅ CORRECCIÓN CLAVE: Verifica si la meta (goal) es mayor que cero para evitar la división por cero (que da NaN).
     val progressValue = if (goal > 0.0) {
         (current / goal).toFloat().coerceIn(0f, 1f)
     } else {
-        // Si la meta es 0, el progreso es 0 para evitar el error NaN.
         0.0f
     }
 
@@ -196,22 +226,27 @@ fun MacroProgressRow(label: String, current: Double, goal: Double, color: Color)
             .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // Asignamos un ancho fijo al texto del label
         Text(label, modifier = Modifier.width(80.dp), style = MaterialTheme.typography.bodySmall)
+
+        // ✅ CORRECCIÓN FINAL: Usamos fillMaxWidth().size(0.dp) para que tome el espacio restante
+        // Esto es un truco de Compose para emular weight(1f) en Row cuando weight() falla.
         LinearProgressIndicator(
-            progress = progressValue, // Usamos el valor seguro
-            modifier = Modifier.weight(1f).height(8.dp),
+            progress = progressValue,
+            modifier = Modifier.fillMaxWidth().height(8.dp),
             color = color
         )
         Spacer(Modifier.width(8.dp))
-        Text("${current.toInt()}/${goal.toInt()}", style = MaterialTheme.typography.bodySmall)
+        Text("${current.toInt()}/${goal.toInt()}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
     }
 }
 
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddMealDialog(
     viewModel: ScheduleViewModel,
-    state: AddMealState,
+    state: MealScheduleState, // NOMBRE CORREGIDO
     onDismiss: () -> Unit,
     onNavigateToMealCreator: () -> Unit
 ) {
@@ -224,22 +259,15 @@ fun AddMealDialog(
         timeFormat.format(Date(state.mealTimeMillis))
     }
 
-    if (state.saveSuccess) {
-        DisposableEffect(Unit) {
-            onDismiss()
-            onDispose { /* Nada que hacer aquí */ }
-        }
-        return
-    }
-
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Programar Comida") },
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                // Selector de Tipo de Comida
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
                     mealTypes.forEach { type ->
                         FilterChip(
@@ -275,7 +303,7 @@ fun AddMealDialog(
                 ) {
                     Text("Recordatorio (min antes):", fontWeight = FontWeight.SemiBold)
                     OutlinedTextField(
-                        value = state.reminderMinutesBefore.toString(),
+                        value = if (state.reminderMinutesBefore == 0) "" else state.reminderMinutesBefore.toString(),
                         onValueChange = {
                             val minutes = it.toIntOrNull() ?: 0
                             viewModel.onReminderMinutesChange(minutes)
@@ -343,7 +371,7 @@ fun PlateSelector(
             modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
             enabled = plateOptions.isNotEmpty()
         ) {
-            Text(selectedPlate?.name ?: "Selecciona un Plato Personalizado")
+            Text(selectedPlate?.name ?: "Selecciona un Plato Personalizado", maxLines = 1)
             Icon(Icons.Default.ArrowDropDown, contentDescription = null)
         }
 
@@ -372,28 +400,34 @@ fun PlateSelector(
     }
 }
 
+// ---------------------- FUNCIONES DE UTILIDAD DE FECHA/HORA ----------------------
+
 @Composable
-fun TimePickerHelper(
-    initialTimeMillis: Long,
-    onTimeSelected: (hour: Int, minute: Int) -> Unit
-) {
+fun TimePickerHelper(initialTimeMillis: Long, onTimeSelected: (Int, Int) -> Unit) {
     val context = LocalContext.current
     val calendar = Calendar.getInstance().apply { timeInMillis = initialTimeMillis }
     val initialHour = calendar.get(Calendar.HOUR_OF_DAY)
     val initialMinute = calendar.get(Calendar.MINUTE)
 
-    TimePickerDialog(
-        context,
-        { _, hour, minute -> onTimeSelected(hour, minute) },
-        initialHour,
-        initialMinute,
-        false // 24-hour format
-    ).show()
+    LaunchedEffect(Unit) {
+        val timePickerDialog = TimePickerDialog(
+            context,
+            { _, hour: Int, minute: Int ->
+                onTimeSelected(hour, minute)
+            }, initialHour, initialMinute, false
+        )
+        timePickerDialog.show()
+    }
 }
 
-// ----------------------------------------------------------------------------------
-// FUNCIONES AUXILIARES DE FECHA/HORA
-// ----------------------------------------------------------------------------------
+
+fun isToday(date: Date): Boolean {
+    val cal1 = Calendar.getInstance()
+    val cal2 = Calendar.getInstance()
+    cal2.time = date
+    return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
+            cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
+}
 
 fun getPreviousDay(date: Date): Date {
     val calendar = Calendar.getInstance()
@@ -418,5 +452,3 @@ fun getFormattedTime(timeMillis: Long): String {
     val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
     return timeFormat.format(Date(timeMillis))
 }
-
-// ----------------------------------------------------------------------------------

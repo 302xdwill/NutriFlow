@@ -2,15 +2,16 @@ package com.example.nutriflow.domain.model
 
 data class User(
     val id: String = "",
-    val name: String = "", // <-- ESTE DEBE EXISTIR
-    val lastName: String = "", // <-- ESTE DEBE EXISTIR
+    val name: String = "",
+    val lastName: String = "",
     val email: String = "",
-    val age: Int,
-    val weight: Double,
-    val height: Double,
-    val photoUrl: String?,
-    val calorieGoal: Double,
-    val proteinGoal: Double,
-    val carbsGoal: Double,
-    val fatGoal: Double
+    // Todos los campos ahora tienen valores por defecto para evitar errores
+    val age: Int = 0,
+    val weight: Double = 0.0,
+    val height: Double = 0.0,
+    val photoUrl: String? = null,
+    val calorieGoal: Double = 2000.0,
+    val proteinGoal: Double = 100.0,
+    val carbsGoal: Double = 250.0,
+    val fatGoal: Double = 70.0
 )
